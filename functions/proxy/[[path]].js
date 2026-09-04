@@ -246,6 +246,19 @@ export async function onRequest(context) {
         return `/proxy/${encodeURIComponent(targetUrl)}`;
     }
 
+    // 豆瓣图床 / 接口要求在请求头中携带 Referer，缺失时会返回 418
+    function getDoubanReferer(targetUrl) {
+        try {
+            const host = new URL(targetUrl).hostname;
+            if (/(^|\.)doubanio\.com$/.test(host) || /(^|\.)douban\.com$/.test(host)) {
+                return 'https://movie.douban.com/';
+            }
+        } catch (e) {
+            // URL 解析失败时不添加 Referer
+        }
+        return null;
+    }
+
     // 获取远程内容及其类型
     async function fetchContentWithType(targetUrl) {
         const headers = new Headers({
@@ -254,7 +267,7 @@ export async function onRequest(context) {
             // 尝试传递一些原始请求的头信息
             'Accept-Language': request.headers.get('Accept-Language') || 'zh-CN,zh;q=0.9,en;q=0.8',
             // 尝试设置 Referer 为目标网站的域名，或者传递原始 Referer
-            'Referer': request.headers.get('Referer') || new URL(targetUrl).origin
+            'Referer': getDoubanReferer(targetUrl) || request.headers.get('Referer') || new URL(targetUrl).origin
         });
 
         try {

@@ -118,6 +118,19 @@ function isValidUrl(urlString) {
   }
 }
 
+// 豆瓣图床 / 接口要求在请求头中携带 Referer，缺失时会返回 418
+function getDoubanReferer(targetUrl) {
+  try {
+    const host = new URL(targetUrl).hostname;
+    if (/(^|\.)doubanio\.com$/.test(host) || /(^|\.)douban\.com$/.test(host)) {
+      return 'https://movie.douban.com/';
+    }
+  } catch (e) {
+    // URL 解析失败时不添加 Referer
+  }
+  return null;
+}
+
 // 验证代理请求的鉴权
 function validateProxyAuth(req) {
   const authHash = req.query.auth;
@@ -178,14 +191,19 @@ app.get('/proxy/:encodedUrl', async (req, res) => {
     
     const makeRequest = async () => {
       try {
+        const requestHeaders = {
+          'User-Agent': config.userAgent
+        };
+        const doubanReferer = getDoubanReferer(targetUrl);
+        if (doubanReferer) {
+          requestHeaders['Referer'] = doubanReferer;
+        }
         return await axios({
           method: 'get',
           url: targetUrl,
           responseType: 'stream',
           timeout: config.timeout,
-          headers: {
-            'User-Agent': config.userAgent
-          }
+          headers: requestHeaders
         });
       } catch (error) {
         if (retries < maxRetries) {

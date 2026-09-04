@@ -136,6 +136,19 @@ function getRandomUserAgent() {
     return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 }
 
+// 豆瓣图床 / 接口要求在请求头中携带 Referer，缺失时会返回 418
+function getDoubanReferer(targetUrl) {
+    try {
+        const host = new URL(targetUrl).hostname;
+        if (/(^|\.)doubanio\.com$/.test(host) || /(^|\.)douban\.com$/.test(host)) {
+            return 'https://movie.douban.com/';
+        }
+    } catch (e) {
+        // URL 解析失败时不添加 Referer
+    }
+    return null;
+}
+
 async function fetchContentWithType(targetUrl, requestHeaders) {
     // 准备请求头
     const headers = {
@@ -143,7 +156,7 @@ async function fetchContentWithType(targetUrl, requestHeaders) {
         'Accept': requestHeaders['accept'] || '*/*', // 传递原始 Accept 头（如果有）
         'Accept-Language': requestHeaders['accept-language'] || 'zh-CN,zh;q=0.9,en;q=0.8',
         // 尝试设置一个合理的 Referer
-        'Referer': requestHeaders['referer'] || new URL(targetUrl).origin,
+        'Referer': getDoubanReferer(targetUrl) || requestHeaders['referer'] || new URL(targetUrl).origin,
     };
     // 清理空值的头
     Object.keys(headers).forEach(key => headers[key] === undefined || headers[key] === null || headers[key] === '' ? delete headers[key] : {});

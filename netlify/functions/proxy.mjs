@@ -123,12 +123,25 @@ function validateAuth(event) {
     return true;
 }
 
+// 豆瓣图床 / 接口要求在请求头中携带 Referer，缺失时会返回 418
+function getDoubanReferer(targetUrl) {
+    try {
+        const host = new URL(targetUrl).hostname;
+        if (/(^|\.)doubanio\.com$/.test(host) || /(^|\.)douban\.com$/.test(host)) {
+            return 'https://movie.douban.com/';
+        }
+    } catch (e) {
+        // URL 解析失败时不添加 Referer
+    }
+    return null;
+}
+
 async function fetchContentWithType(targetUrl, requestHeaders) {
     const headers = {
         'User-Agent': getRandomUserAgent(),
         'Accept': requestHeaders['accept'] || '*/*',
         'Accept-Language': requestHeaders['accept-language'] || 'zh-CN,zh;q=0.9,en;q=0.8',
-        'Referer': requestHeaders['referer'] || new URL(targetUrl).origin,
+        'Referer': getDoubanReferer(targetUrl) || requestHeaders['referer'] || new URL(targetUrl).origin,
     };
     Object.keys(headers).forEach(key => headers[key] === undefined || headers[key] === null || headers[key] === '' ? delete headers[key] : {});
     logDebug(`Fetching target: ${targetUrl} with headers: ${JSON.stringify(headers)}`);
