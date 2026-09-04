@@ -282,11 +282,20 @@ export async function onRequest(context) {
                  throw new Error(`HTTP error ${response.status}: ${response.statusText}. URL: ${targetUrl}. Body: ${errorBody.substring(0, 150)}`);
             }
 
+            const contentType = response.headers.get('Content-Type') || '';
+
+            // 二进制内容（图片/音视频等）必须按 ArrayBuffer 读取，
+            // 用 text() 读取会把字节序列按 UTF-8 解码导致内容损坏
+            if (isMediaFile(targetUrl, contentType)) {
+                const content = await response.arrayBuffer();
+                logDebug(`请求成功(二进制): ${targetUrl}, Content-Type: ${contentType}, 字节数: ${content.byteLength}`);
+                return { content, contentType, responseHeaders: response.headers, isBinary: true };
+            }
+
             // 读取响应内容为文本
             const content = await response.text();
-            const contentType = response.headers.get('Content-Type') || '';
             logDebug(`请求成功: ${targetUrl}, Content-Type: ${contentType}, 内容长度: ${content.length}`);
-            return { content, contentType, responseHeaders: response.headers }; // 同时返回原始响应头
+            return { content, contentType, responseHeaders: response.headers, isBinary: false }; // 同时返回原始响应头
 
         } catch (error) {
              logDebug(`请求彻底失败: ${targetUrl}: ${error.message}`);
@@ -453,7 +462,9 @@ export async function onRequest(context) {
             kvNamespace = null; // 确保设为 null
         }
 
-        if (kvNamespace) {
+        // 媒体文件（图片/音视频等二进制）跳过文本缓存：
+        // 历史版本按文本缓存二进制会导致内容损坏，且新逻辑也不再将二进制写入 KV
+        if (kvNamespace && !isMediaFile(targetUrl, '')) {
             try {
                 const cachedContent = await kvNamespace.get(cacheKey);
                 if (cachedContent) {
@@ -552,7 +563,18 @@ export async function onRequest(context) {
         }
 
         // --- 实际请求 ---
-        const { content, contentType, responseHeaders } = await fetchContentWithType(targetUrl);
+        const { content, contentType, responseHeaders, isBinary } = await fetchContentWithType(targetUrl);
+
+        // --- 二进制内容（图片/音视频等）直接透传，不做文本处理与文本缓存 ---
+        if (isBinary) {
+            logDebug(`透传二进制内容: ${targetUrl} (类型: ${contentType})`);
+            const binaryHeaders = new Headers(responseHeaders);
+            binaryHeaders.set('Cache-Control', `public, max-age=${CACHE_TTL}`);
+            binaryHeaders.set("Access-Control-Allow-Origin", "*");
+            binaryHeaders.set("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS");
+            binaryHeaders.set("Access-Control-Allow-Headers", "*");
+            return createResponse(content, 200, binaryHeaders);
+        }
 
         // --- 写入缓存 (KV) ---
         if (kvNamespace) {
