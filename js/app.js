@@ -25,8 +25,26 @@ document.addEventListener('DOMContentLoaded', function () {
     // 渲染搜索历史
     renderSearchHistory();
 
-    // 设置默认API选择（如果是第一次加载）
-    if (!localStorage.getItem('hasInitializedDefaults')) {
+    // 2026-09 迁移：清理已删除的失效源（电影天堂/黑木耳/卧龙/华为吧/魔爪/樱花/无尽/旺旺/小猫咪）
+    {
+        const storedAPIs = JSON.parse(localStorage.getItem('selectedAPIs') || 'null');
+        const oldDefaultAPIs = ["tyyszy", "dyttzy", "bfzy", "ruyi"];
+        const newDefaultAPIs = ["zuid", "guangsu", "ffzy", "lzi", "ruyi"];
+        if (Array.isArray(storedAPIs)) {
+            const isOldDefault = storedAPIs.length === oldDefaultAPIs.length &&
+                storedAPIs.every(id => oldDefaultAPIs.includes(id));
+            // 从未自定义过的老用户直接用新默认；其余用户剔除已删除的源
+            let migrated = isOldDefault
+                ? newDefaultAPIs
+                : storedAPIs.filter(id => API_SITES[id]);
+            if (migrated.length === 0) migrated = newDefaultAPIs;
+            selectedAPIs = migrated;
+            localStorage.setItem('selectedAPIs', JSON.stringify(migrated));
+        }
+    }
+
+    // 设置默认API选择（仅当没有任何已存选择，即真正首次加载）
+    if (!localStorage.getItem('selectedAPIs')) {
         // 默认选中资源
         selectedAPIs = ["zuid", "guangsu", "ffzy", "lzi", "ruyi"];
         localStorage.setItem('selectedAPIs', JSON.stringify(selectedAPIs));
@@ -38,9 +56,9 @@ document.addEventListener('DOMContentLoaded', function () {
         // 默认启用豆瓣功能
         localStorage.setItem('doubanEnabled', 'true');
 
-        // 标记已初始化默认值
-        localStorage.setItem('hasInitializedDefaults', 'true');
     }
+    // 标记已完成 v2 初始化/迁移
+    localStorage.setItem('hasInitializedDefaults_v2', 'true');
 
     // 设置黄色内容过滤器开关初始状态
     const yellowFilterToggle = document.getElementById('yellowFilterToggle');
