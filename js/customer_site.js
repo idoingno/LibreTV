@@ -1,8 +1,4 @@
 const CUSTOMER_SITES = {
-    qiqi: {
-        api: 'https://www.qiqidys.com/api.php/provide/vod',
-        name: '七七资源',
-    },
     // 2026-09-04 实测可用的新增源（搜索关键词"流浪地球"验证通过）
     uku: {
         api: 'http://api.ukuapi.com/api.php/provide/vod',
@@ -12,10 +8,6 @@ const CUSTOMER_SITES = {
         api: 'http://hongniuzy2.com/api.php/provide/vod',
         name: '红牛资源',
     },
-    ffzy2: {
-        api: 'http://cj.ffzyapi.com/api.php/provide/vod',
-        name: '非凡影视(新)',
-    },
     guangsu: {
         api: 'https://api.guangsuapi.com/api.php/provide/vod',
         name: '光速资源',
@@ -23,10 +15,6 @@ const CUSTOMER_SITES = {
     subo: {
         api: 'https://subocj.com/api.php/provide/vod',
         name: '速播资源',
-    },
-    taojin: {
-        api: 'https://taopianapi.com/cjapi/mc/vod/json.html',
-        name: '淘金资源',
     },
     jinying: {
         api: 'https://jyzyapi.com/provide/vod',
