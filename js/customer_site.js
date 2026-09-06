@@ -8,10 +8,6 @@ const CUSTOMER_SITES = {
         api: 'http://api.ukuapi.com/api.php/provide/vod',
         name: 'U酷资源',
     },
-    zuida2: {
-        api: 'http://zuidazy.me/api.php/provide/vod/',
-        name: '最大资源(新)',
-    },
     hongniu: {
         api: 'http://hongniuzy2.com/api.php/provide/vod',
         name: '红牛资源',
