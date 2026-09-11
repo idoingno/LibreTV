@@ -437,11 +437,15 @@ function initPlayer(videoUrl) {
         liveDurationInfinity: false
     };
 
+    // Internet Archive 等公共领域源可能直接给 mp4，需要按后缀判断
+    const urlExt = (videoUrl.match(/\.([a-zA-Z0-9]+)(?:\?|$)/) || [null, 'm3u8'])[1].toLowerCase();
+    const playerType = urlExt === 'mp4' || urlExt === 'webm' || urlExt === 'ogg' ? 'mp4' : 'm3u8';
+
     // Create new ArtPlayer instance
     art = new Artplayer({
         container: '#player',
         url: videoUrl,
-        type: 'm3u8',
+        type: playerType,
         title: videoTitle,
         volume: 0.8,
         isLive: false,

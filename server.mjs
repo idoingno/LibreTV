@@ -6,8 +6,29 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
+import { HttpsProxyAgent } from 'https-proxy-agent';
+import { registerIaRoutes } from './server-ia-adapter.mjs';
 
 dotenv.config();
+
+// 出站 HTTPS 代理：仅对 archive.org 生效（其他源保持直连避免代理被打满）
+const OUTBOUND_PROXY =
+  process.env.IA_HTTPS_PROXY ||
+  process.env.HTTPS_PROXY ||
+  process.env.https_proxy ||
+  process.env.ALL_PROXY ||
+  process.env.all_proxy ||
+  '';
+const outboundAgent = OUTBOUND_PROXY ? new HttpsProxyAgent(OUTBOUND_PROXY) : undefined;
+const IA_HOSTS = /(^|\.)(archive\.org|us\.archive\.org)$/i;
+function shouldProxy(targetUrl) {
+  if (!outboundAgent) return false;
+  try {
+    return IA_HOSTS.test(new URL(targetUrl).hostname);
+  } catch {
+    return false;
+  }
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -167,33 +188,48 @@ function validateProxyAuth(req) {
 
 app.get('/proxy/:encodedUrl', async (req, res) => {
   try {
+    const encodedUrl = req.params.encodedUrl;
+    let targetUrl = decodeURIComponent(encodedUrl);
+
+    // archive.org 封面图服务是公开只读资源，免鉴权代理——让 <img src> 可直接使用
+    const isCoverBypass = /^https:\/\/archive\.org\/services\/img\//.test(targetUrl);
+
     // 验证鉴权
-    if (!validateProxyAuth(req)) {
+    if (!isCoverBypass && !validateProxyAuth(req)) {
       return res.status(401).json({
         success: false,
         error: '代理访问未授权：请检查密码配置或鉴权参数'
       });
     }
 
-    const encodedUrl = req.params.encodedUrl;
-    const targetUrl = decodeURIComponent(encodedUrl);
+    // 本站相对路径（如 /api/ia?...）补全 origin，避免 proxy"转发给自己"
+    // 前端 search.js 会把 API_SITES.ia 里的 /api/ia 也走 proxy
+    const isLocal = targetUrl.startsWith('/');
+    if (isLocal) {
+      targetUrl = `http://127.0.0.1:${config.port}${targetUrl}`;
+    }
 
-    // 安全验证
-    if (!isValidUrl(targetUrl)) {
+    // 安全验证：本地路由（/api/...）跳过 isValidUrl 检查
+    if (!isLocal && !isValidUrl(targetUrl)) {
       return res.status(400).send('无效的 URL');
     }
 
     log(`代理请求: ${targetUrl}`);
 
+    // 透传 Range 头（视频拖进度条需要）
+    const rangeHeader = req.headers.range;
     // 添加请求超时和重试逻辑
     const maxRetries = config.maxRetries;
     let retries = 0;
-    
+
     const makeRequest = async () => {
       try {
         const requestHeaders = {
           'User-Agent': config.userAgent
         };
+        if (rangeHeader) {
+          requestHeaders['Range'] = rangeHeader;
+        }
         const doubanReferer = getDoubanReferer(targetUrl);
         if (doubanReferer) {
           requestHeaders['Referer'] = doubanReferer;
@@ -203,7 +239,11 @@ app.get('/proxy/:encodedUrl', async (req, res) => {
           url: targetUrl,
           responseType: 'stream',
           timeout: config.timeout,
-          headers: requestHeaders
+          headers: requestHeaders,
+          validateStatus: (s) => s < 500, // 让 206/304 等 2xx/3xx/4xx 都通过
+          // 仅 archive.org 走代理，其他源直连
+          httpsAgent: shouldProxy(targetUrl) ? outboundAgent : undefined,
+          proxy: false, // 禁用 axios 自带 proxy，让 httpsAgent 接管
         });
       } catch (error) {
         if (retries < maxRetries) {
@@ -217,13 +257,16 @@ app.get('/proxy/:encodedUrl', async (req, res) => {
 
     const response = await makeRequest();
 
+    // 透传 upstream 状态码（206 PartialContent / 304 不可丢）
+    res.status(response.status);
+
     // 转发响应头（过滤敏感头）
     const headers = { ...response.headers };
     const sensitiveHeaders = (
-      process.env.FILTERED_HEADERS || 
+      process.env.FILTERED_HEADERS ||
       'content-security-policy,cookie,set-cookie,x-frame-options,access-control-allow-origin'
     ).split(',');
-    
+
     sensitiveHeaders.forEach(header => delete headers[header]);
     res.set(headers);
 
@@ -243,6 +286,10 @@ app.get('/proxy/:encodedUrl', async (req, res) => {
 app.use(express.static(path.join(__dirname), {
   maxAge: config.cacheMaxAge
 }));
+
+// Internet Archive (archive.org) 采集 API 适配器
+// 提供 /api/ia?ac=videolist&wd=... 和 /api/ia?ac=videolist&ids=...
+registerIaRoutes(app);
 
 app.use((err, req, res, next) => {
   console.error('服务器错误:', err);

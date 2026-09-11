@@ -762,7 +762,9 @@ async function search() {
                 `data-api-url="${item.api_url.replace(/"/g, '&quot;')}"` : '';
 
             // 修改为水平卡片布局，图片在左侧，文本在右侧，并优化样式
-            const hasCover = item.vod_pic && item.vod_pic.startsWith('http');
+            // 接受 http* 绝对路径 或 /proxy/ 开头的站内相对路径（IA 源的封面）
+            const hasCover = item.vod_pic &&
+                (item.vod_pic.startsWith('http') || item.vod_pic.startsWith('/proxy/'));
 
             return `
                 <div class="card-hover bg-[#111] rounded-lg overflow-hidden cursor-pointer transition-all hover:scale-[1.02] h-full shadow-sm hover:shadow-md" 

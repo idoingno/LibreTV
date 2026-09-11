@@ -23,3 +23,8 @@ coverage
 *.sln
 *.sw?
 .env
+
+# Local tooling / runtime caches（个人开发环境产物，不入库）
+.claude/
+.firecrawl/
+.wrangler/

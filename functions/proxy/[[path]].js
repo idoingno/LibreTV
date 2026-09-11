@@ -28,8 +28,19 @@ export async function onRequest(context) {
     const { request, env, next, waitUntil } = context; // next 和 waitUntil 可能需要
     const url = new URL(request.url);
 
-    // 验证鉴权（主函数调用）
-    const isValidAuth = await validateAuth(request, env);
+    // 验证鉴权（主函数调用）。
+    // 例外：archive.org 的封面图服务是公开的、只读、无写权限，允许免鉴权代理
+    // 否则前端 <img src> 无法附加 auth 参数，图片会裂。
+    const urlForAuthCheck = new URL(request.url);
+    const isCoverBypass = (() => {
+        try {
+            const enc = urlForAuthCheck.pathname.replace(/^\/proxy\//, '');
+            const decoded = decodeURIComponent(enc);
+            return /^https:\/\/archive\.org\/services\/img\//.test(decoded);
+        } catch { return false; }
+    })();
+
+    const isValidAuth = isCoverBypass ? true : await validateAuth(request, env);
     if (!isValidAuth) {
         return new Response(JSON.stringify({
             success: false,
@@ -136,7 +147,7 @@ export async function onRequest(context) {
     }
 
     // 从请求路径中提取目标 URL
-    function getTargetUrlFromPath(pathname) {
+    function getTargetUrlFromPath(pathname, requestUrl) {
         // 路径格式: /proxy/经过编码的URL
         // 例如: /proxy/https%3A%2F%2Fexample.com%2Fplaylist.m3u8
         const encodedUrl = pathname.replace(/^\/proxy\//, '');
@@ -144,6 +155,13 @@ export async function onRequest(context) {
         try {
             // 解码
             let decodedUrl = decodeURIComponent(encodedUrl);
+
+             // 本站相对路径（如 /api/ia?wd=x&auth=...）拼上原请求 origin，
+             // 让 proxy 函数 internal fetch 到同站点的 Functions（即 /functions/api/ia）
+             if (decodedUrl.startsWith('/')) {
+                 const origin = new URL(requestUrl).origin;
+                 return origin + decodedUrl;
+             }
 
              // 简单检查解码后是否是有效的 http/https URL
              if (!decodedUrl.match(/^https?:\/\//i)) {
@@ -259,7 +277,23 @@ export async function onRequest(context) {
         return null;
     }
 
-    // 获取远程内容及其类型
+    // 流式代理二进制内容（图片/音视频）。不要先入内存，否则会撑爆 Worker 内存
+    // 并透传 Range header（视频拖进度条需要 206 Partial Content）
+    async function fetchBinaryStream(targetUrl) {
+        const headers = new Headers({
+            'User-Agent': getRandomUserAgent(),
+            'Accept': '*/*',
+            'Accept-Language': request.headers.get('Accept-Language') || 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Referer': getDoubanReferer(targetUrl) || request.headers.get('Referer') || new URL(targetUrl).origin
+        });
+        const rangeHeader = request.headers.get('Range');
+        if (rangeHeader) {
+            headers.set('Range', rangeHeader);
+        }
+        return fetch(targetUrl, { headers, redirect: 'follow' });
+    }
+
+    // 获取远程内容及其类型（仅文本/M3U8 用；二进制走 fetchBinaryStream）
     async function fetchContentWithType(targetUrl) {
         const headers = new Headers({
             'User-Agent': getRandomUserAgent(),
@@ -514,7 +548,7 @@ export async function onRequest(context) {
     // --- 主要请求处理逻辑 ---
 
     try {
-        const targetUrl = getTargetUrlFromPath(url.pathname);
+        const targetUrl = getTargetUrlFromPath(url.pathname, request.url);
 
         if (!targetUrl) {
             logDebug(`无效的代理请求路径: ${url.pathname}`);
@@ -562,19 +596,30 @@ export async function onRequest(context) {
             }
         }
 
-        // --- 实际请求 ---
-        const { content, contentType, responseHeaders, isBinary } = await fetchContentWithType(targetUrl);
-
-        // --- 二进制内容（图片/音视频等）直接透传，不做文本处理与文本缓存 ---
-        if (isBinary) {
-            logDebug(`透传二进制内容: ${targetUrl} (类型: ${contentType})`);
-            const binaryHeaders = new Headers(responseHeaders);
-            binaryHeaders.set('Cache-Control', `public, max-age=${CACHE_TTL}`);
-            binaryHeaders.set("Access-Control-Allow-Origin", "*");
-            binaryHeaders.set("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS");
-            binaryHeaders.set("Access-Control-Allow-Headers", "*");
-            return createResponse(content, 200, binaryHeaders);
+        // --- 二进制内容（图片/音视频/字幕等）走流式代理，不入 Worker 内存 ---
+        // 通过扩展名或 HEAD 先判定；用原请求的 Range header 透传到上游
+        const binaryHinted = isMediaFile(targetUrl, '');
+        if (binaryHinted) {
+            logDebug(`[流式代理] 二进制: ${targetUrl}`);
+            const upstream = await fetchBinaryStream(targetUrl);
+            // 透传 upstream 的状态码与关键 header（200 / 206 / 304）
+            const streamHeaders = new Headers(upstream.headers);
+            streamHeaders.delete('content-security-policy');
+            streamHeaders.delete('set-cookie');
+            streamHeaders.delete('x-frame-options');
+            streamHeaders.set('Cache-Control', `public, max-age=${CACHE_TTL}`);
+            streamHeaders.set('Access-Control-Allow-Origin', '*');
+            streamHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
+            streamHeaders.set('Access-Control-Allow-Headers', '*');
+            return new Response(upstream.body, {
+                status: upstream.status,
+                statusText: upstream.statusText,
+                headers: streamHeaders
+            });
         }
+
+        // --- 实际请求 (文本/M3U8/JSON) ---
+        const { content, contentType, responseHeaders } = await fetchContentWithType(targetUrl);
 
         // --- 写入缓存 (KV) ---
         if (kvNamespace) {

@@ -64,10 +64,33 @@ const API_SITES = {
         api: 'https://cj.lziapi.com/api.php/provide/vod/',
         name: '量子资源站'
     },
+    ckzy: {
+        api: 'https://www.ckzy1.com/api.php/provide/vod',
+        name: 'CK资源',
+        adult: true
+    },
+    jinying: {
+        api: 'https://jinyingzy.com/api.php/provide/vod',
+        name: '金鹰资源'
+    },
+    guangsu: {
+        api: 'https://api.guangsuapi.com/api.php/provide/vod',
+        name: '光速资源'
+    },
+    hongniu: {
+        api: 'https://www.hongniuzy2.com/api.php/provide/vod',
+        name: '红牛资源'
+    },
     testSource: {
         api: 'https://www.example.com/api.php/provide/vod',
         name: '空内容测试源',
         adult: true
+    },
+    // Internet Archive 公有领域经典电影/动画/纪录片
+    ia: {
+        api: '/api/ia',
+        name: 'IA经典',
+        detail: 'https://archive.org'
     }
     //ARCHIVE https://telegra.ph/APIs-08-12
 };
